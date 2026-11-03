@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>FM Tracker Builder</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#F2F4F7;--ink:#14212B;--mut:#5B6975;--line:#D5DBE1;--acc:#27497A;--ok:#1E7A57;--warn:#FFF3D6;--calc:#EAF0F7}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 "IBM Plex Sans",system-ui,sans-serif}
+header{padding:22px 28px 6px;display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap}h1{margin:0;font-size:24px;font-weight:600}header p{margin:4px 0 0;color:var(--mut)}
+nav{display:flex;gap:0;margin:14px 28px 0;border-bottom:2px solid var(--line);overflow-x:auto}
+nav button{background:none;border:0;padding:10px 16px;font:inherit;color:var(--mut);cursor:pointer;border-bottom:3px solid transparent;margin-bottom:-2px;white-space:nowrap}
+nav button.on{color:var(--acc);font-weight:600;border-color:var(--acc)}nav button.done::after{content:" ✓";color:var(--ok)}
+main{padding:22px 28px 60px;max-width:1500px}
+.box{background:#fff;border:1px solid var(--line);border-radius:6px;padding:18px;margin-bottom:16px;max-width:900px}
+.box.wide{max-width:none}h2{font-size:17px;margin:0 0 4px}.hint{color:var(--mut);font-size:13.5px;margin:0 0 12px}
+table{border-collapse:collapse;width:100%}th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);font-size:14px;vertical-align:middle}
+select,input[type=text],input[type=number]{font:inherit;padding:5px 7px;border:1px solid var(--line);border-radius:4px;width:100%;background:#fff}
+button.p{background:var(--acc);color:#fff;border:0;border-radius:4px;padding:9px 16px;font:inherit;font-weight:500;cursor:pointer}
+button.s{background:#fff;color:var(--acc);border:1px solid var(--acc);border-radius:4px;padding:7px 12px;font:inherit;cursor:pointer}
+:focus-visible{outline:2px solid var(--acc);outline-offset:1px}
+.tag{font-size:12px;padding:1px 7px;border-radius:10px;background:var(--calc);color:var(--acc)}.tag.m{background:var(--warn);color:#8A5A00}
+.row{display:flex;gap:12px;align-items:end;flex-wrap:wrap;margin-bottom:12px}.row label{font-size:13px;color:var(--mut);display:block}
+.grid{overflow:auto;max-height:68vh;border:1px solid var(--line);background:#fff}.grid table{width:max-content}
+.grid th{position:sticky;top:0;background:#E3E8EE;z-index:1;white-space:nowrap}.grid td{padding:0}.grid input{border:0;border-radius:0;min-width:110px;width:110px}
+.grid td.c input{background:var(--calc)}.grid input.e{background:var(--warn)}.msg{color:var(--mut);font-size:13.5px}
+</style></head><body>
+<header><div><h1>FM Tracker Builder</h1><p>Files ko 1 se 4 tak serial mein upload karo. Har step mein fields fixed aate hain, chaho to manual badal sakte ho. Sab kuch browser mein hota hai, data kahin upload nahi hota.</p></div><button class="p" data-dl>Download final Excel</button></header>
+<nav id="nav"></nav><main id="app"></main>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
+<script>
+pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+const H=['Invoice Amnt','Invoice No','Invoice Date','Booking Date','pickup date','Recd at SZN WH Dt.','HAWB No.','MAWB no.','Flight Operator','date','ETD HKG/WUH','ETA Del','Actual arrival','customs cleared dt.','WH Delivery Date','Delay By JHA','Box','Actual Weight','Volumetric Weight (WH)','Billing Weight','Rate','Freight Gross Amount','GST','Duty','Other','Other Invoice Charges','Tax Other','Net Amount','Jha Invoice Number','Jha Invoice Amount'];
+const DATES=H.slice(2,15).filter(h=>h!=='HAWB No.'&&h!=='MAWB no.'&&h!=='Flight Operator');
+const CALC=['Delay By JHA','Freight Gross Amount','GST','Tax Other','Net Amount'];
+const J=['Invoice No','Invoice Date','Booking Date','pickup date','Recd at SZN WH Dt.','MAWB no.','Flight Operator','date','ETD HKG/WUH','ETA Del','Actual arrival','customs cleared dt.','WH Delivery Date'];
+const STEPS=[
+{id:'jha',name:'Jha Tracker',type:'xlsx',info:'Jha Tracker Excel upload karo. Isse shipments (HAWB No. se) aur dates ki list banti hai. Source mein date naam ke 2 columns ho to pehla Invoice Date banta hai aur doosra date field.',fields:J.map(x=>({t:x,s:[{'Invoice No':'invoice no.','Invoice Date':'date','Booking Date':'booking date',date:'date (2)','WH Delivery Date':'delivery at GGN WH'}[x]||x]}))},
+{id:'boe',name:'BOE PDFs',type:'pdf',info:'Saari BOE (CBE-XIII) PDFs ek saath upload karo. Sirf page 1 padha jata hai, isliye badi PDF bhi tezi se chalti hai.',fields:[['Invoice Amnt','Assessable Value'],['Box','No of Packages'],['Actual Weight','Net Weight'],['Duty','Duty(Rs.)'],['Other','Interest Amount']].map(([t,s])=>({t,s}))},
+{id:'ost',name:'One Stop Tracker',type:'xlsx',info:'One Stop Tracker Excel upload karo. HAWB se match hoga.',fields:[{t:'Billing Weight',s:['billing wt.']},{t:'Rate',s:['Freight /kg (INR)']}]},
+{id:'inv',name:'JHA Invoice',type:'xlsx',info:'JHA Invoice Excel upload karo. Charges ke 4 columns jodkar Other Invoice Charges banta hai.',fields:[{t:'Other Invoice Charges',sum:1,s:['Airlines D.O. + Endorsement fee','Origin Handling Charges','Demurrage / Detention charges','Clearance and Delivery Charges']},{t:'Jha Invoice Number',s:['INVOICE NO']},{t:'Jha Invoice Amount',s:['INVOICE NO+DEBIT NOTE NO']}]},
+{id:'out',name:'FM Tracker',type:'out'}];
+const S={step:0,xl:{},pdf:[],labels:{},man:{},extra:[],tpl:null,gst:.18,gstO:.18};
+STEPS[1].fields.forEach(f=>S.labels[f.t]=f.s);
+const $=s=>document.querySelector(s),pad=n=>String(n).padStart(2,'0'),norm=s=>String(s??'').toLowerCase().replace(/[^a-z0-9]/g,'');
+const esc=s=>String(s??'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+const fmtD=d=>`${pad(d.getUTCDate())}-${pad(d.getUTCMonth()+1)}-${d.getUTCFullYear()}`;
+const parseD=s=>{const m=/^(\d{2})-(\d{2})-(\d{4})$/.exec(s);return m?new Date(Date.UTC(+m[3],m[2]-1,+m[1])):null};
+const num=v=>{if(typeof v==='number')return v;const t=String(v).trim();return /^-?(\d[\d,]*)?\.?\d+$/.test(t)?parseFloat(t.replace(/,/g,'')):v};
+const r2=x=>Math.round(x*100)/100;
+function cv(v){if(v==null)return'';if(v instanceof Date)return fmtD(v);if(typeof v==='object'){if('result' in v)return cv(v.result);if(v.richText)return v.richText.map(t=>t.text).join('');if('text' in v)return cv(v.text);return''}return typeof v==='string'?v.trim():v}
+function guess(hs,name){const n=norm(name);return hs.find(h=>norm(h)===n)||hs.find(h=>n&&norm(h).includes(n))||''}
+async function readXl(file,hr){const wb=new ExcelJS.Workbook();await wb.xlsx.load(await file.arrayBuffer());const ws=wb.worksheets[0],headers=[];
+ const seen={};ws.getRow(hr).eachCell({includeEmpty:false},(c,i)=>{let h=String(cv(c.value)).replace(/\s+/g,' ').trim();if(h){const k=norm(h);seen[k]=(seen[k]||0)+1;if(seen[k]>1)h+=` (${seen[k]})`}headers[i]=h});
+ const rows=[];for(let r=hr+1;r<=ws.rowCount;r++){const o={};let any=0;headers.forEach((h,i)=>{if(h){const v=cv(ws.getRow(r).getCell(i).value);o[h]=v;if(v!=='')any=1}});any&&rows.push(o)}
+ return{headers:headers.filter(Boolean),rows}}
+//PDF-START
+async function pdfHead(file){const pdf=await pdfjsLib.getDocument({data:await file.arrayBuffer()}).promise;const tc=await(await pdf.getPage(1)).getTextContent();
+ const it=tc.items.filter(i=>i.str.trim()).map(i=>({s:i.str,x:i.transform[4],y:i.transform[5],w:i.width}));const lines=[];
+ for(const t of it){const L=lines.find(l=>Math.abs(l.y-t.y)<3);L?L.t.push(t):lines.push({y:t.y,t:[t]})}
+ const txt=lines.sort((a,b)=>b.y-a.y).map(l=>{l.t.sort((a,b)=>a.x-b.x);let s='',e=null;for(const t of l.t){if(e!==null){const g=t.x-e;s+=g>10?'   ':g>1?' ':''}s+=t.s;e=t.x+t.w}return s}).join('\n');
+ const cut=txt.search(/DETAILS OF ITEM/i);return cut>0?txt.slice(0,cut):txt}
+const grab=(t,l)=>{const m=t.match(new RegExp(l.trim().replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'\\s*:[ \\t]*(.*?)(?=\\s{3,}|\\n|$)','i'));return m?m[1].trim():''};
+//PDF-END
+function records(){const R=new Map(),get=h=>{h=String(h).trim();if(!h)return null;if(!R.has(h))R.set(h,{'HAWB No.':h});return R.get(h)};
+ for(const st of STEPS){if(st.type==='xlsx'){const f=S.xl[st.id];if(!f)continue;
+  for(const row of f.rows){const r=get(row[f.key]);if(!r)continue;for(const fd of st.fields){const v=(f.map[fd.t]||[]).map(h=>h?row[h]:'');r[fd.t]=fd.sum?r2(v.reduce((a,x)=>a+(+num(x)||0),0)):num(v[0])}}}
+  if(st.type==='pdf')for(const p of S.pdf){const r=get(p.hawb);if(r)for(const fd of st.fields){const v=grab(p.text,S.labels[fd.t]);if(v!=='')r[fd.t]=num(v)}}}
+ S.extra.forEach(get);
+ return[...R.values()].map(r=>{const o={...r},n=x=>+num(x)||0,d1=parseD(o['customs cleared dt.']),d0=parseD(o['Actual arrival']);
+  if(d1&&d0)o['Delay By JHA']=Math.round((d1-d0)/864e5);
+  o['Freight Gross Amount']=r2(n(o['Billing Weight'])*n(o['Rate']));o['GST']=r2(o['Freight Gross Amount']*S.gst);o['Tax Other']=r2(n(o['Other Invoice Charges'])*S.gstO);
+  Object.assign(o,S.man[o['HAWB No.']]||{});
+  o['Net Amount']=S.man[o['HAWB No.']]?.['Net Amount']??r2(['Freight Gross Amount','GST','Duty','Other','Other Invoice Charges','Tax Other'].reduce((a,h)=>a+n(o[h]),0));return o})}
+function mapTable(st){const f=S.xl[st.id];return`<table><tr><th>Tracker field</th><th>Source column</th><th></th></tr>${st.fields.map((fd,fi)=>`<tr><td>${fd.t}</td><td>${fd.s.map((d,i)=>`<select data-m="${st.id}" data-f="${fi}" data-i="${i}"><option value="">— blank —</option>${f.headers.map(h=>`<option ${f.map[fd.t][i]===h?'selected':''}>${esc(h)}</option>`).join('')}</select>`).join('')}</td><td>${f.map[fd.t].every((h,i)=>h===guess(f.headers,fd.s[i]))?'<span class="tag">fixed</span>':'<span class="tag m">manual</span>'}</td></tr>`).join('')}</table>`}
+function render(){const st=STEPS[S.step];
+ $('#nav').innerHTML=STEPS.map((s,i)=>`<button class="${i===S.step?'on':''} ${(s.type==='xlsx'&&S.xl[s.id])||(s.type==='pdf'&&S.pdf.length)?'done':''}" data-go="${i}">${i<4?i+1+' · ':''}${s.name}</button>`).join('');
+ let h='';
+ if(st.type==='xlsx'){const f=S.xl[st.id];h=`<div class="box"><h2>${st.name}</h2><p class="hint">${st.info}</p><div class="row"><div><label>Excel file</label><input type="file" accept=".xlsx" data-up="${st.id}"></div><div style="width:110px"><label>Header row no.</label><input type="number" min="1" value="${f?.hr||1}" id="hr"></div></div>${f?`<p class="msg">${f.name}: ${f.rows.length} rows</p><div class="row"><div style="min-width:260px"><label>Shipment key column (HAWB)</label><select data-key="${st.id}">${f.headers.map(x=>`<option ${f.key===x?'selected':''}>${esc(x)}</option>`).join('')}</select></div></div>${mapTable(st)}`:'<p class="msg">Abhi koi file nahi. Upload karne par fields apne aap match ho jayenge.</p>'}</div>`}
+ if(st.type==='pdf')h=`<div class="box"><h2>${st.name}</h2><p class="hint">${st.info}</p><input type="file" accept=".pdf" multiple data-pdf><p class="msg" id="pm">${S.pdf.length?S.pdf.length+' PDF padh li gayi.':''}</p><table><tr><th>Tracker field</th><th>Label jo PDF mein likha hai</th><th></th></tr>${st.fields.map(fd=>`<tr><td>${fd.t}</td><td><input type="text" data-lab="${fd.t}" value="${esc(S.labels[fd.t])}"></td><td>${S.labels[fd.t]===fd.s?'<span class="tag">fixed</span>':'<span class="tag m">manual</span>'}</td></tr>`).join('')}</table></div>`;
+ if(st.type==='out'){const R=records();h=`<div class="box wide"><div class="row"><div><h2>FM Tracker (${R.length} rows)</h2><p class="hint" style="margin:0">Peele cells khali hain, yaani data nahi mila. Kisi bhi cell mein manual value likh sakte ho. Neele cells formula se bante hain.</p></div>
+ <div style="width:90px"><label>GST</label><input type="number" step="0.01" value="${S.gst}" data-rate="gst"></div><div style="width:90px"><label>Tax Other</label><input type="number" step="0.01" value="${S.gstO}" data-rate="gstO"></div>
+ <div><label>FM_Tracker_Format.xlsx (optional, formatting ke liye)</label><input type="file" accept=".xlsx" data-tpl></div><button class="s" data-add>Row jodo</button><button class="p" data-dl>Download final Excel</button></div>
+ <div class="grid"><table><tr>${H.map(x=>`<th>${x}</th>`).join('')}</tr>${R.map(r=>`<tr>${H.map((c,j)=>`<td class="${CALC.includes(c)?'c':''}"><input type="text" data-h="${esc(r['HAWB No.'])}" data-c="${j}" class="${r[c]===undefined||r[c]===''?'e':''}" value="${esc(r[c])}"></td>`).join('')}</tr>`).join('')}</table></div>
+ <p class="hint" style="margin-top:10px">Delay By JHA = customs cleared dt. minus Actual arrival (days). Net Amount = Freight Gross + GST + Duty + Other + Other Invoice Charges + Tax Other. Volumetric Weight (WH) manual bharna hai.</p></div>`}
+ $('#app').innerHTML=h}
+document.addEventListener('click',e=>{const t=e.target;if(t.dataset.go!==undefined){S.step=+t.dataset.go;render()}
+ if(t.dataset.add!==undefined){const v=prompt('HAWB No.?');if(v){S.extra.push(v.trim());render()}}
+ if(t.dataset.dl!==undefined)exportXlsx()});
+document.addEventListener('change',async e=>{const t=e.target,d=t.dataset;
+ if(d.up){const st=STEPS.find(s=>s.id===d.up),hr=+$('#hr').value||1,{headers,rows}=await readXl(t.files[0],hr);
+  const map={};st.fields.forEach(fd=>map[fd.t]=fd.s.map(x=>guess(headers,x)));S.xl[d.up]={name:t.files[0].name,hr,headers,rows,map,key:guess(headers,'hawb')||headers[0]};render()}
+ if(d.m){S.xl[d.m].map[STEPS.find(s=>s.id===d.m).fields[+d.f].t][+d.i]=t.value;render()}
+ if(d.key){S.xl[d.key].key=t.value;render()}
+ if(d.lab){S.labels[d.lab]=t.value;render()}
+ if(d.rate){S[d.rate]=+t.value;render()}
+ if(d.pdf!==undefined){const pm=$('#pm');S.pdf=[];let i=0;for(const f of t.files){pm.textContent=`Padh raha hoon ${++i}/${t.files.length}...`;
+   try{const text=await pdfHead(f);S.pdf.push({text,hawb:grab(text,'HAWB Number')||(f.name.match(/\d{9,}/)||[''])[0]})}catch(x){console.error(f.name,x)}}render()}
+ if(d.tpl!==undefined){S.tpl=await t.files[0].arrayBuffer();alert('Template mil gaya. Download par isi ki formatting use hogi.')}
+ if(d.h!==undefined){(S.man[d.h]??={})[H[+d.c]]=num(t.value);render()}});
+async function exportXlsx(){const R=records();if(!R.length){alert('Pehle koi file upload karo, tabhi download hoga.');return}const wb=new ExcelJS.Workbook();let ws;
+ if(S.tpl){await wb.xlsx.load(S.tpl);ws=wb.worksheets[0];ws.spliceRows(2,1)}else{ws=wb.addWorksheet('Sheet1');ws.addRow(H);ws.getRow(1).font={bold:true};ws.columns=H.map(()=>({width:15}))}
+ R.forEach((r,i)=>{const n=i+2,row=ws.getRow(n),m=S.man[r['HAWB No.']]||{};H.forEach((h,j)=>{const c=row.getCell(j+1);let v=r[h];if(v===''||v===undefined)v=null;
+  if(DATES.includes(h)&&typeof v==='string'&&parseD(v)){v=parseD(v);c.numFmt='dd-mm-yyyy'}
+  if(!(h in m)){const f={'Delay By JHA':`IF(AND(ISNUMBER(N${n}),ISNUMBER(M${n})),N${n}-M${n},"")`,'Freight Gross Amount':`T${n}*U${n}`,GST:`V${n}*${S.gst}`,'Tax Other':`Z${n}*${S.gstO}`,'Net Amount':`V${n}+W${n}+X${n}+Y${n}+Z${n}+AA${n}`}[h];if(f)v={formula:f,result:v??undefined}}
+  c.value=v});row.commit()});
+ const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([await wb.xlsx.writeBuffer()]));a.download='FM_Tracker.xlsx';a.click()}
+render();
+</script></body></html>
